@@ -6,6 +6,23 @@
 SF.Instance = {}
 SF.Instance.__index = SF.Instance
 
+local cocreate, coresume, coyield, costatus = coroutine.create, coroutine.resume, coroutine.yield, coroutine.status
+
+-- Convenience function for separating the function from the parameters
+-- in the return values of coroutine.yield
+local function run(func, ...)
+	func(...)
+end
+
+-- debug.gethook() returns the string "external hook" instead of a function... |:/
+-- (I think) it basically just errors after 500000000 lines
+local function infloop_detection_replacement()
+	error("Infinite Loop Detected!",2)
+end
+
+-- Some small efficiency thing
+local noop = function() end
+
 --- Instance fields
 -- @name Instance
 -- @class table
@@ -20,42 +37,6 @@ SF.Instance.__index = SF.Instance
 -- @field error True if instance is errored and should not be executed
 -- @field mainfile The main file
 -- @field player The "owner" of the instance
-
--- debug.gethook() returns the string "external hook" instead of a function... |:/
--- (I think) it basically just errors after 500000000 lines
-local function infloop_detection_replacement()
-	error("Infinite Loop Detected!",2)
-end
-
---- Internal function - do not call.
--- Runs a function while incrementing the instance ops coutner.
--- This does no setup work and shouldn't be called by client code
--- @param func The function to run
--- @param ... Arguments to func
--- @return True if ok
--- @return Any values func returned
-function SF.Instance:runWithOps(func,...)
-	local maxops = self.context.ops
-	
-	local function ophook(event)
-		self.ops = self.ops + 500
-		if self.ops > maxops then
-			debug.sethook(nil)
-			error("Ops quota exceeded.",0)
-		end
-	end
-	
-	--local begin = SysTime()
-	--local beginops = self.ops
-	
-	debug.sethook(ophook,"",500)
-	local rt = {pcall(func, ...)}
-	debug.sethook(infloop_detection_replacement,"",500000000)
-	
-	--MsgN("SF: Exectued "..(self.ops-beginops).." instructions in "..(SysTime()-begin).." seconds")
-	
-	return unpack(rt)
-end
 
 --- Internal function - Do not call. Prepares the script to be executed.
 -- This is done automatically by Initialize and RunScriptHook.
@@ -87,14 +68,31 @@ function SF.Instance:initialize()
 	self:runLibraryHook("initialize")
 	self:prepare("_initialize","_initialize")
 	
-	for i=1,#self.scripts do
-		local func = self.scripts[i]
-		local ok, err = self:runWithOps(func)
-		if not ok then
-			self:cleanup("_initialize", true, err)
-			self.error = true
-			return false, err
+	self.routine = cocreate(function()
+		-- Initialization
+		for i=1,#self.scripts do
+			self.scripts[i]()
 		end
+		
+		-- Loop
+		local results = nil
+		while true do
+			results = {run(coyield(results))}
+		end
+	end)
+	
+	debug.sethook(self.routine,function(ev)
+		self.ops = self.ops + 500
+		if self.ops > maxops then
+			error("Ops quota exceeded.",0)
+		end
+	end, "", 500)
+	
+	local ok, err = coresume(self.routine)
+	if not ok then
+		self:cleanup("_initialize","_initialize",true,err)
+		self.error = true
+		return false, err
 	end
 	
 	SF.allInstances[self] = self
@@ -109,8 +107,8 @@ end
 -- @return True if it executed ok, false if not or if there was no hook
 -- @return If the first return value is false then the error message or nil if no hook was registered
 function SF.Instance:runScriptHook(hook, ...)
-	for tbl in self:iterTblScriptHook(hook,...) do
-		if not tbl[1] then return false, tbl[2] end
+	for ok, tbl in self:iterTblScriptHook(hook,...) do
+		if not ok then return false, tbl end
 	end
 	return true
 end
@@ -121,75 +119,66 @@ end
 -- @return True if it executed ok, false if not or if there was no hook
 -- @return If the first return value is false then the error message or nil if no hook was registered. Else any values that the hook returned.
 function SF.Instance:runScriptHookForResult(hook,...)
-	for tbl in self:iterTblScriptHook(hook,...) do
-		if not tbl[1] then return false, tbl[2]
-		elseif tbl[2] then
-			return unpack(tbl)
-		end
+	for ok, tbl in self:iterTblScriptHook(hook,...) do
+		if not ok then return false, tbl
+		else return true, unpack(tbl) end
 	end
 	return true
 end
 
--- Some small efficiency thing
-local noop = function() end
-
 --- Creates an iterator that calls each registered function for a hook
 -- @param hook The hook to call.
 -- @param ... Arguments to pass to the hook's registered function.
--- @return An iterator function returning pcall-like results for each registered function.
+-- @return An iterator function returning if ok and results for each registered function.
 function SF.Instance:iterScriptHook(hook,...)
 	local hooks = self.hooks[hook:lower()]
 	if not hooks then return noop end
+	
 	local index = nil
 	local args = {...}
 	return function()
 		if self.error then return end
-		local name, func = next(hooks,index)
-		if not name then return end
-		index = name
+		local index, func = next(hooks,index)
 		
 		self:prepare(hook,name)
 		
-		local results = {self:runWithOps(func,unpack(args))}
-		if not results[1] then
-			self:cleanup(hook,name,true,results[2])
+		local ok, results = coresume(self.routine, func, unpack(args))
+		if not ok then
+			self:cleanup(hook,name,true,results)
 			self.error = true
-			return false, results[2]
+			return false, results
 		end
 		
 		self:cleanup(hook,name,false)
-		
 		return unpack(results)
 	end
 end
 
---- Like SF.Instance:iterSciptHook, except that it returns an array of pcall-like values instead of unpacking them
--- @param hook The hook to call.
+--- Like SF.Instance:iterSciptHook, except that it returns the results
+-- in a table
 -- @param ... Arguments to pass to the hook's registered function.
--- @return An iterator function returning a table of pcall-like results for each registered function.
+-- @return An iterator function returning if ok and a table of results for each registered function.
 function SF.Instance:iterTblScriptHook(hook,...)
 	local hooks = self.hooks[hook:lower()]
 	if not hooks then return noop end
+	
 	local index = nil
 	local args = {...}
 	return function()
 		if self.error then return end
-		local name, func = next(hooks,index)
-		if not name then return end
-		index = name
+		local index, func = next(hooks,index)
 		
 		self:prepare(hook,name)
 		
-		local results = {self:runWithOps(func,unpack(args))}
-		if not results[1] then
-			self:cleanup(hook,name,true,results[2])
+		local ok, results = coresume(self.routine, func, unpack(args))
+		if not ok then
+			self:cleanup(hook,name,true,results)
 			self.error = true
-			return results
+			return false, results
 		end
 		
 		self:cleanup(hook,name,false)
-		
-		return results
+		return true, results
 	end
 end
 
@@ -208,16 +197,15 @@ end
 function SF.Instance:runFunction(func,...)
 	self:prepare("_runFunction",func)
 	
-	local ok, err = self:runWithOps(func,...)
+	local ok, results = coresume(self.routine, func, ...)
 	if not ok then
-		self:cleanup("_runFunction", true, err)
+		self:cleanup("_runFunction",func,true,err)
 		self.error = true
-		return false, err
+		return false, results
 	end
+	self:cleanup("_runFunction",func,false,err)
 	
-	self:cleanup("_runFunction",func,false)
-	
-	return true, err
+	return true, results
 end
 
 --- Resets the amount of operations used.
@@ -229,7 +217,7 @@ end
 --- Deinitializes the instance. After this, the instance should be discarded.
 function SF.Instance:deinitialize()
 	self:runLibraryHook("deinitialize")
-	SF.allInstances[self] = self
+	SF.allInstances[self] = nil
 	self.error = true
 end
 
