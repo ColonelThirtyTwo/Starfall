@@ -1,6 +1,5 @@
--------------------------------------------------------------------------------
--- @release $Id: standard.lua,v 1.39 2007/12/21 17:50:48 tomas Exp $
--------------------------------------------------------------------------------
+
+--- Taglet for SF, mostly copied from LuaDoc's standard taglet.
 
 local assert, pairs, tostring, type = assert, pairs, tostring, type
 local io = require "io"
@@ -15,29 +14,11 @@ local print = print
 
 module 'taglet_sf'
 
-local function printTable(tbl, tabs, printed)
-	tabs = tabs or 0
-	printed = printed or {}
-	local indention = string.rep("\t",tabs)
-	for k,v in pairs(tbl) do
-		local dont_print = false
-		if type(v) == "table" then
-			if not printed[v] then
-				print(indention..tostring(k))
-				print(indention.."{")
-				printed[v] = k
-				printTable(v,tabs+1,printed)
-				printed[v] = nil
-				print(indention.."}")
-			else
-				print(indentation..tostring(k),"=","[table:"..printed[v].."]")
-			end
-		else
-			print(indention..tostring(k),"=",v)
-		end
-	end
+-- LuaDoc doesn't like ../ in pathnames when specifying where to look for lua files.
+-- This trims out the '../lua/starfall/" that will pretty much always be there.
+local function fix_filepath(fname)
+	return fname:match("^..[/\\]lua[/\\]starfall[/\\]?(.*)$") or fname
 end
-
 
 -------------------------------------------------------------------------------
 -- Creates an iterator for an array base on a class type.
@@ -104,13 +85,13 @@ local function check_library(line)
 	line = util.trim(line)
 
 	-- Global library
-	local name, tblref = line:match("^SF%.Libraries%.Register%(\"([^\"]+)\",([%w_]+)%)$")
-	if name then
+	local tblref, name = line:match("^%s*local%s+([%w_]+).-=%s*SF%.Libraries%.Register%(\"([^\"]+)\".-%)$")
+	if tblref then
 		return name, tblref
 	end
 
 	-- Local library
-	local name, tblref = line:match("^SF%.Libraries%.RegisterLocal%(%s*\"([^\"]+)\"%s*,([%w_]+)%s*%)$")
+	local tblref, name = line:match("^%s*local%s+([%w_]+).-=%s*SF%.Libraries%.RegisterLocal%(\"([^\"]+)\".-%)$")
 	return name, tblref
 end
 
@@ -245,6 +226,8 @@ local function parse_comment (block, first_line, libs)
 		assert(block.name, "Unnamed library")
 		assert(block.libtbl, "No library table for "..block.name)
 		libs[block.libtbl] = block
+		block.field = block.fields or {}
+		block.functions = block.functions or {}
 	elseif block.class == "function" then
 		local libtbl, fname = block.name:match("(.*)[%.:]([^%.:]+)$")
 		
@@ -341,6 +324,7 @@ function parse_file (filepath, doc)
 	end
 	f:close()
 	-- store blocks in file hierarchy
+	local filepath = fix_filepath(filepath)
 	assert(doc.files[filepath] == nil, string.format("doc for file `%s' already defined", filepath))
 	table.insert(doc.files, filepath)
 	doc.files[filepath] = {
