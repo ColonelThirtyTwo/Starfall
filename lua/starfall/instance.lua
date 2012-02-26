@@ -6,6 +6,7 @@
 SF.Instance = {}
 SF.Instance.__index = SF.Instance
 
+if not require "coroutine_fix" then error("--> YOU NEED gm_coroutine_fix.dll IN YOUR lua/include/modules FOLDER TO RUN STARFALL <--",0) end
 local cocreate, coresume, coyield, costatus = coroutine.create, coroutine.resume, coroutine.yield, coroutine.status
 
 -- Convenience function for separating the function from the parameters
@@ -83,7 +84,7 @@ function SF.Instance:initialize()
 	
 	debug.sethook(self.routine,function(ev)
 		self.ops = self.ops + 500
-		if self.ops > maxops then
+		if self.ops > self.context.ops then
 			error("Ops quota exceeded.",0)
 		end
 	end, "", 500)
@@ -138,7 +139,9 @@ function SF.Instance:iterScriptHook(hook,...)
 	local args = {...}
 	return function()
 		if self.error then return end
-		local index, func = next(hooks,index)
+		local func
+		index, func = next(hooks,index)
+		if not index then return end
 		
 		self:prepare(hook,name)
 		
@@ -166,7 +169,9 @@ function SF.Instance:iterTblScriptHook(hook,...)
 	local args = {...}
 	return function()
 		if self.error then return end
-		local index, func = next(hooks,index)
+		local func
+		index, func = next(hooks,index)
+		if not index then return end
 		
 		self:prepare(hook,name)
 		
