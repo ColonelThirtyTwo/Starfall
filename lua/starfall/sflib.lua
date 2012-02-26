@@ -26,6 +26,21 @@ SF.defaultquota = CreateConVar("sf_defaultquota", "100000", {FCVAR_ARCHIVE,FCVAR
 
 local dgetmeta = debug.getmetatable
 
+SF.instanceStack = {}
+
+--- Internal function - do not call. Pushes an instance onto the instance stack and sets SF.instance.
+function SF.PushInstance(instance)
+	SF.instanceStack[#SF.instanceStack+1] = instance
+	SF.instance = instance
+end
+
+--- Internal function - do not call. Pops an instance from the instance stack and sets SF.instance.
+function SF.PopInstance()
+	assert(SF.instanceStack[1], "Instance stack underflow")
+	SF.instance = SF.instanceStack[#SF.instanceStack-1]
+	SF.instanceStack[#SF.instanceStack] = nil
+end
+
 --- Creates a type that is safe for SF scripts to use. Instances of the type
 -- cannot access the type's metatable or metamethods.
 -- @return The table to store normal methods

@@ -44,10 +44,9 @@ local noop = function() end
 function SF.Instance:prepare(hook, name)
 	assert(self.initialized, "Instance not initialized!")
 	assert(not self.error, "Instance is errored!")
-	assert(SF.instance == nil)
 	
 	self:runLibraryHook("prepare",hook, name)
-	SF.instance = self
+	SF.PushInstance(self)
 end
 
 --- Internal function - Do not call. Cleans up the script.
@@ -55,7 +54,7 @@ end
 function SF.Instance:cleanup(hook, name, ok, errmsg)
 	assert(SF.instance == self)
 	self:runLibraryHook("cleanup",hook, name, ok, errmsg)
-	SF.instance = nil
+	SF.PopInstance(self)
 end
 
 --- Runs the scripts inside of the instance. This should be called once after
