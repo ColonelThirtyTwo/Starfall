@@ -1,3 +1,6 @@
+-------------------------------------------------------------------------------
+-- Serverside Entity functions
+-------------------------------------------------------------------------------
 
 assert(SF.Entities)
 
@@ -39,6 +42,10 @@ function SF.Entities.GetOwner(entity)
 	if entity.GetPlayer then
 		local ply = entity:GetPlayer()
 		if valid(ply) then return ply end
+	end
+	
+	if entity.owner and valid(entity.owner) and entity.owner:isPlayer() then
+		return entity.owner
 	end
 	
 	local OnDieFunctions = entity.OnDieFunctions
@@ -93,16 +100,6 @@ function ents_methods:owner()
 	SF.CheckType(self,ents_metatable)
 	local ent = unwrap(self)
 	return wrap(getOwner(self))
-end
-
---- Returns whoever created the script
-function ents_lib.owner()
-	return wrap(SF.instance.player)
-end
-
---- Same as ents_lib.owner() on the server.
-function ents_lib.player()
-	return wrap(SF.instance.player)
 end
 
 --- Applies linear force to the entity

@@ -4,7 +4,6 @@ AddCSLuaFile('shared.lua')
 include('shared.lua')
 
 include("starfall/SFLib.lua")
-include("libtransfer/libtransfer.lua")
 assert(SF, "Starfall didn't load correctly!")
 
 local context = SF.CreateContext()
@@ -111,7 +110,7 @@ function ENT:Think()
 	
 	if self.instance and not self.instance.error then
 		self.instance:resetOps()
-		self:RunScriptHook("think")
+		self:runScriptHook("think")
 	end
 	
 	return true
@@ -126,7 +125,7 @@ function ENT:Use( activator )
 		umsg.End( )
 	end
 	if self.sharedscreen then
-		self:RunScriptHook( "starfall_used", SF.Entities.Wrap( activator ) )
+		self:runScriptHook( "starfall_used", SF.Entities.Wrap( activator ) )
 	end
 end
 
@@ -137,19 +136,20 @@ function ENT:OnRemove()
 	self.instance = nil
 end
 
-function ENT:RunScriptHook(hook, ...)
-	if self.instance and not self.instance.error and self.instance.hooks[hook:lower()] then
-		local ok, rt = self.instance:runScriptHook(hook, ...)
-		if not ok then self:Error(rt) end
-	end
-end
-
 function ENT:TriggerInput(key, value)
-	if self.instance and not self.instance.error then
-		self.instance:runScriptHook("input",key,value)
-	end
+	self:runScriptHook("input",key,value)
 end
 
-function ENT:ApplyDupeInfo(ply, ent, info, GetEntByID, GetConstByID)
-	self.BaseClass.ApplyDupeInfo(self, ply, ent, info, GetEntByID, GetConstByID)
+function ENT:BuildDupeInfo()
+	local info = self.BaseClass.BuildDupeInfo(self) or {}
+	info.starfall = SF.SerializeCode(self.task.files, self.task.mainfile)
+	return info
+end
+
+function ENT:ApplyDupeInfo(ply, ent, info, GetEntByID)
+	self.BaseClass.ApplyDupeInfo(self, ply, ent, info, GetEntByID)
+	self.owner = ply
+	local code, main = SF.DeserializeCode(info.starfall)
+	local task = {files = code, mainfile = main}
+	self:CodeSent(ply, task)
 end

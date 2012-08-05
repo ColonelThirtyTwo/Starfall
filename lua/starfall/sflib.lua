@@ -1,6 +1,42 @@
+-------------------------------------------------------------------------------
+-- The main Starfall library
+-------------------------------------------------------------------------------
 
-if SF then return end -- Already loaded
+if SF ~= nil then return end
 SF = {}
+
+-- Do a couple of checks for retarded mods that disable the debug table
+-- and run it after all addons load
+do
+	local function zassert(cond, str)
+		if not cond then error("STARFALL LOAD ABORT: "..str,0) end
+	end
+
+	zassert(debug, "debug table removed")
+
+	-- Check for modified getinfo
+	local info = debug.getinfo(0,"S")
+	zassert(info, "debug.getinfo modified to return nil")
+	zassert(info.what == "C", "debug.getinfo modified")
+
+	-- Check for modified setfenv
+	info = debug.getinfo(debug.setfenv, "S")
+	zassert(info.what == "C", "debug.setfenv modified")
+
+	-- Check get/setmetatable
+	info = debug.getinfo(debug.getmetatable)
+	zassert(info.what == "C", "debug.getmetatable modified")
+	info = debug.getinfo(debug.setmetatable)
+	zassert(info.what == "C", "debug.setmetatable modified")
+
+	-- Lock the debug table
+	local olddebug = debug
+	debug = setmetatable({}, {
+		__index = olddebug,
+		__newindex = function(self,k,v) print("Addon tried to modify debug table") end,
+		__metatable = "nope.avi",
+	})
+end
 
 -- Send files to client
 if SERVER then
@@ -131,8 +167,7 @@ end
 --		function.
 -- @return The function to wrap sensitive values to a SF-safe table
 -- @return The function to unwrap the SF-safe table to the sensitive table
-function SF.CreateWrapper(metatable, weakwrapper, weaksensitive, 
-			target_metatable )
+function SF.CreateWrapper(metatable, weakwrapper, weaksensitive, target_metatable)
 	local s2sfmode = ""
 	local sf2smode = ""
 	
@@ -187,7 +222,7 @@ end
 -- wrapped object.
 -- @return the unwrapped starfall object
 function SF.UnwrapObject( object )
-	local metatable = degetmeta(object)
+	local metatable = dgetmeta(object)
 	
 	local unwrap = object_unwrappers[metatable]
 	return unwrap and unwrap(object)
@@ -206,7 +241,7 @@ function SF.WrapFunction( func, instance )
 		return SF.Unsanitize( instance:runFunction( func, SF.Sanitize(...) ) )
 	end
 	wrappedfunctions[func] = returned_func
-	wrappedfunctions2instance[func] = instance
+	wrappedfunctions2instance[returned_func] = instance
 	
 	return returned_func
 end
@@ -276,15 +311,46 @@ function SF.Unsanitize( ... )
 		if (typ == "table" and object_unwrappers[dgetmeta(value)]) then
 			return_list[key] = SF.UnwrapObject(value) or value
 		elseif typ == "table" then
+			return_list[key] = {}
+
 			for k,v in pairs(value) do
-				return_list[SF.Unsanitize(k)] = SF.Unsanitize(v)
+				return_list[key][SF.Unsanitize(k)] = SF.Unsanitize(v)
 			end
 		else
 			return_list[key] = value
 		end
 	end
-	
-	return unpack(args)
+
+	return unpack( return_list )
+end
+
+
+
+local serialize_replace_regex = "[\"\n]"
+local serialize_replace_tbl = {["\n"] = "£", ['"'] = "€"}
+--- Serializes an instance's code in a format compatible with the duplicator library
+-- @param sources The table of filename = source entries. Ususally instance.source
+-- @param mainfile The main filename. Usually instance.mainfile
+function SF.SerializeCode(sources, mainfile)
+	local rt = {source = {}}
+	for filename, source in pairs(sources) do
+		rt.source[filename] = string.gsub(source, serialize_replace_regex, serialize_replace_tbl)
+	end
+	rt.mainfile = mainfile
+	return rt
+end
+
+local deserialize_replace_regex = "[£€]"
+local deserialize_replace_tbl = {["£"] = "\n", ['€'] = '"'}
+--- Deserializes an instance's code.
+-- @return The table of filename = source entries
+-- @return The main filename
+function SF.DeserializeCode(tbl)
+	local sources = {}
+	for filename, source in pairs(tbl.source) do
+		sources[filename] = string.gsub(source, deserialize_replace_regex, deserialize_replace_tbl)
+	end
+	return sources, tbl.mainfile
 end
 
 -- Library loading

@@ -191,6 +191,7 @@ local function parse_comment (block, first_line, libs)
 			block.libtbl = libtbl
 			block.field = {}
 			block.functions = {}
+			block.tables = {}
 		else
 			block.param = {}
 		end
@@ -228,6 +229,7 @@ local function parse_comment (block, first_line, libs)
 		libs[block.libtbl] = block
 		block.field = block.fields or {}
 		block.functions = block.functions or {}
+		block.tables = block.tables or {}
 	elseif block.class == "function" then
 		local libtbl, fname = block.name:match("(.*)[%.:]([^%.:]+)$")
 		
@@ -241,10 +243,24 @@ local function parse_comment (block, first_line, libs)
 			table.insert(lib.functions,fname)
 			lib.functions[fname] = block
 		end
+	elseif block.class == "table" then
+		local libtbl, tname = block.name:match("(.*)%.([^%.]+)$")
+		
+		if libtbl and not block.library and libs[libtbl] then
+			block.library = libtbl
+		end
+		if block.library then
+			local lib = libs[block.library]
+			assert(lib, "no such library: "..block.library)
+			block.library = lib.name
+			table.insert(lib.tables,tname)
+			lib.tables[tname] = block
+		end
 	end
 
 	-- extracts summary information from the description
 	block.summary = parse_summary(block.description)
+	assert(block.summary)
 	--assert(string.sub(block.description, 1, 1) ~= " ", string.format("`%s'", block.description))
 	
 	return block
@@ -367,6 +383,11 @@ function parse_file (filepath, doc)
 		doc.libraries[t.name] = t
 	end
 	
+	for t in class_iterator(blocks, "hook")() do
+		table.insert(doc.hooks, t.name)
+		doc.hooks[t.name] = t
+	end
+	
 	return doc
 end
 
@@ -438,9 +459,11 @@ function start (files, doc)
 	doc = doc or {
 		files = {},
 		libraries = {},
+		hooks = {},
 	}
 	assert(doc.files, "undefined `files' field")
 	assert(doc.libraries, "undefined `libraries' field")
+	assert(doc.hooks, "undefined `hooks' field")
 	
 	table.foreachi(files, function (_, path)
 		local attr = lfs.attributes(path)
@@ -456,6 +479,7 @@ function start (files, doc)
 	-- order arrays alphabetically
 	recsort(doc.files)
 	recsort(doc.libraries)
+	recsort(doc.hooks)
 
 	return doc
 end

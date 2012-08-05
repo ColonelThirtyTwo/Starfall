@@ -1,8 +1,16 @@
+-------------------------------------------------------------------------------
+-- Networking library.
+-------------------------------------------------------------------------------
 
 local umsg = umsg
 
 --- Usermessages library. Used for sending data from the server to the client.
 local umsg_library, _ = SF.Libraries.Register("umsg")
+
+--- Called when a usermessage is recieved
+-- @name umsg
+-- @class hook
+-- @param data The umsg object
 
 if SERVER then
 	-- -------------------------------------------------------------- --
@@ -153,10 +161,10 @@ if SERVER then
 		umsg.Vector(val)
 	end
 	
-	--- Adds a angle. Takes up 12 bytes.
+	--- Adds an angle. Takes up 12 bytes.
 	-- @param val Value
 	-- @server
-	function umsg_library.vector(val)
+	function umsg_library.angle(val)
 		SF.CheckType(val,"Angle")
 		local umsgdata = SF.instance.data.umsg
 		if not umsgdata.entering then
