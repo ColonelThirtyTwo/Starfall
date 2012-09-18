@@ -7,7 +7,7 @@
 SF.Instance = {}
 SF.Instance.__index = SF.Instance
 
-if not require "coroutine_fix" then error("--> YOU NEED gm_coroutine_fix.dll IN YOUR lua/include/modules FOLDER TO RUN STARFALL <--",0) end
+if VERSION < 151 then error("--> YOU NEED GM13 TO USE STARFALL+COROUTINES <--",0) end
 local cocreate, coresume, coyield, costatus = coroutine.create, coroutine.resume, coroutine.yield, coroutine.status
 
 -- Convenience function for separating the function from the parameters
@@ -63,6 +63,7 @@ end
 -- not be called more than once.
 -- @return True if no script errors occured
 -- @return The error message, if applicable
+-- @return The error traceback, if applicable
 function SF.Instance:initialize()
 	assert(not self.initialized, "Already initialized!")
 	self.initialized = true
@@ -71,9 +72,7 @@ function SF.Instance:initialize()
 	
 	self.routine = cocreate(function()
 		-- Initialization
-		for i=1,#self.scripts do
-			self.scripts[i]()
-		end
+		self.scripts[self.mainfile]()
 		
 		-- Loop
 		local results = nil
@@ -91,9 +90,10 @@ function SF.Instance:initialize()
 	
 	local ok, err = coresume(self.routine)
 	if not ok then
-		self:cleanup("_initialize","_initialize",true,err)
+		local traceback = debug.traceback(self.routine)
+		self:cleanup("_initialize","_initialize",true,err,traceback)
 		self.error = true
-		return false, err
+		return false, err, traceback
 	end
 	
 	SF.allInstances[self] = self
@@ -108,8 +108,8 @@ end
 -- @return True if it executed ok, false if not or if there was no hook
 -- @return If the first return value is false then the error message or nil if no hook was registered
 function SF.Instance:runScriptHook(hook, ...)
-	for ok, tbl in self:iterTblScriptHook(hook,...) do
-		if not ok then return false, tbl end
+	for ok,tbl,traceback in self:iterTblScriptHook(hook,...) do
+		if not ok then return false,tbl,traceback end
 	end
 	return true
 end
@@ -119,18 +119,23 @@ end
 -- @param ... Arguments to pass to the hook's registered function.
 -- @return True if it executed ok, false if not or if there was no hook
 -- @return If the first return value is false then the error message or nil if no hook was registered. Else any values that the hook returned.
+-- @return The traceback if the instance errored
 function SF.Instance:runScriptHookForResult(hook,...)
-	for ok, tbl in self:iterTblScriptHook(hook,...) do
-		if not ok then return false, tbl
-		else return true, unpack(tbl) end
+	for ok,tbl,traceback in self:iterTblScriptHook(hook,...) do
+		if not ok then
+			return false, tbl, traceback
+		elseif tbl and tbl[1] then
+			return true, unpack(tbl)
+		end
 	end
 	return true
 end
 
---- Creates an iterator that calls each registered function for a hook
+--- Creates an iterator that calls each registered function for a hook.
 -- @param hook The hook to call.
 -- @param ... Arguments to pass to the hook's registered function.
--- @return An iterator function returning if ok and results for each registered function.
+-- @return An iterator function returning the ok status, and then either the hook
+-- results or the error message and traceback
 function SF.Instance:iterScriptHook(hook,...)
 	local hooks = self.hooks[hook:lower()]
 	if not hooks then return noop end
@@ -147,20 +152,21 @@ function SF.Instance:iterScriptHook(hook,...)
 		
 		local ok, results = coresume(self.routine, func, unpack(args))
 		if not ok then
-			self:cleanup(hook,name,true,results)
+			local traceback = debug.traceback(self.routine)
+			self:cleanup(hook,name,true,results,traceback)
 			self.error = true
-			return false, results
+			return false, results, traceback
 		end
 		
 		self:cleanup(hook,name,false)
-		return unpack(results)
+		return true, unpack(results)
 	end
 end
 
---- Like SF.Instance:iterSciptHook, except that it returns the results
--- in a table
+--- Like SF.Instance:iterSciptHook, except that it doesn't unpack the hook results.
 -- @param ... Arguments to pass to the hook's registered function.
--- @return An iterator function returning if ok and a table of results for each registered function.
+-- @return An iterator function returning the ok status, then either the table of
+-- hook results or the error message and traceback
 function SF.Instance:iterTblScriptHook(hook,...)
 	local hooks = self.hooks[hook:lower()]
 	if not hooks then return noop end
@@ -177,9 +183,10 @@ function SF.Instance:iterTblScriptHook(hook,...)
 		
 		local ok, results = coresume(self.routine, func, unpack(args))
 		if not ok then
-			self:cleanup(hook,name,true,results)
+			local traceback = debug.traceback(self.routine)
+			self:cleanup(hook,name,true,results,traceback)
 			self.error = true
-			return false, results
+			return false, results, traceback
 		end
 		
 		self:cleanup(hook,name,false)
@@ -199,18 +206,21 @@ end
 -- make sense (ex timers).
 -- @param func Function to run
 -- @param ... Arguments to pass to func
+-- @return true if the function ran without erroring, false if it errored
+-- @return The return values of the function, or the error message and traceback
 function SF.Instance:runFunction(func,...)
 	self:prepare("_runFunction",func)
 	
 	local ok, results = coresume(self.routine, func, ...)
 	if not ok then
+		local traceback = debug.traceback(self.routine)
 		self:cleanup("_runFunction",func,true,err)
 		self.error = true
-		return false, results
+		return false, results, traceback
 	end
-	self:cleanup("_runFunction",func,false,err)
+	self:cleanup("_runFunction",func,false,err,traceback)
 	
-	return true, results
+	return true, unpack(results)
 end
 
 --- Resets the amount of operations used.

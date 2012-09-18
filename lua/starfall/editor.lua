@@ -70,8 +70,6 @@ if CLIENT then
 		["_"] = true,
 	}
 	
-	local operatorstr = "%+%-/%*%^%%#=~,%.%(%)%[%]{}_" -- A string of all operators, used in the patterns below
-	
 	--[[
 	-- E2 colors
 	local colors = {
@@ -108,19 +106,16 @@ if CLIENT then
 	}
 	]]
 	
-	--Sublime text editor inspired colors
 	local colors = {
-		["keyword"]	= { Color(249,  38, 114), false}, -- pink
-		["operator"]	= { Color(248, 248, 248), false}, -- pink
-		["number"]		= { Color(174, 129, 255), false}, -- purpleish
-		["variable"]	= { Color(248, 248, 242), false}, -- white
-		["string"]		= { Color(230, 219, 116), false}, -- yellowish
-		["function"]	= { Color(102, 217, 239), false}, -- teal
-		
-		["comment"]		= { Color(133, 133, 133), false}, -- grey
-		["ppcommand"]   = { Color(240, 240, 160), false}, -- It was the same as "string". Hurt eyes. (Copy-paste mistake?) Now the same as from E2's editor
-		
-		["notfound"]	= { Color(240,  96,  96), false}, -- dark red
+		["keyword"]     = { Color(100, 100, 255), false},
+		["operator"]    = { Color(150, 150, 200), false},
+		["brackets"]    = { Color(120, 120, 255), false},
+		["number"]      = { Color(174, 129, 255), false},
+		["variable"]    = { Color(248, 248, 242), false},
+		["string"]      = { Color(230, 219, 116), false},
+		["comment"]     = { Color(133, 133, 133), false},
+		["ppcommand"]   = { Color(170, 170, 170), false},
+		["notfound"]    = { Color(240,  96,  96), false},
 	}
 	
 	-- cols[n] = { tokendata, color }
@@ -223,56 +218,17 @@ if CLIENT then
 			self.tokendata = ""
 			
 			-- Eat all spaces
-			local spaces = self:SkipPattern( "^ *" )
+			local spaces = self:SkipPattern( "^%s*" )
 			if spaces then addToken( "comment", spaces ) end
 	
 			if self:NextPattern( "^%a[%w_]*" ) then -- Variables and keywords
 				if keywords[self.tokendata] then
 					addToken( "keyword", self.tokendata )
 				else
-					local found = false
-					
-					local builtins = SF.DefaultEnvironment
-					for funcname,_ in pairs( builtins ) do
-						if self.tokendata == funcname then
-							addToken( "function", self.tokendata )
-							found = true
-							break
-						end
-					end
-					
-					if not found then
-						local libraries = SF.Libraries.libraries
-						for libname,lib in pairs( libraries ) do -- Check library name
-							if self.tokendata == libname then -- match!
-								addToken( "function", self.tokendata )
-								found = true
-								break
-							else -- No match. Check function name instead
-								if type(lib.__index) == "table" then
-									for funcname,func in pairs( lib.__index ) do
-										if self.tokendata == funcname then -- match!
-											addToken( "function", self.tokendata )
-											found = true
-											break
-										end
-									end
-								end
-							end
-						end
-					end
-					
-					if not found then
-						--print("Found variable '" .. self.tokendata .. "'" )
-						addToken( "variable", self.tokendata )
-					end
+					addToken( "variable", self.tokendata )
 				end
-				
-				self.tokendata = ""
-			elseif self:NextPattern( "^%d+" ) then -- Numbers
+			elseif self:NextPattern( "^%d*%.?%d+" ) then -- Numbers
 				addToken( "number", self.tokendata )
-				self.tokendata = ""
-			
 			elseif self:NextPattern( "^%-%-" ) then -- Comment
 				if self:NextPattern( "^@" ) then -- ppcommand
 					self:NextPattern( ".*" ) -- Eat all the rest
@@ -288,16 +244,12 @@ if CLIENT then
 					self:NextPattern( ".*" ) -- Skip the rest
 					addToken( "comment", self.tokendata )
 				end
-				
-				self.tokendata = ""
 			elseif self:NextPattern( "^[\"']" ) then -- Single line string
 				if findStringEnding( self,row, self.tokendata ) then -- String ending found
 					addToken( "string", self.tokendata )
-					self.tokendata = ""
 				else -- No ending found
 					self:NextPattern( ".*" ) -- Eat everything
 					addToken( "string", self.tokendata )
-					self.tokendata = ""
 				end
 			elseif self:NextPattern( "^%[%[" ) then -- Multi line strings
 				if findMultilineEnding( self, row, "string" ) then -- Ending found
@@ -306,20 +258,15 @@ if CLIENT then
 					self:NextPattern( ".*" )
 					addToken( "string", self.tokendata )
 				end
-				
-				self.tokendata = ""
-			elseif self:NextPattern( "^[" .. operatorstr .. "]" ) then -- Operators
+			elseif self:NextPattern( "^[%+%-/%*%^%%#=~,;:%._]" ) then -- Operators
 				addToken( "operator", self.tokendata )
-				self.tokendata = ""
+			elseif self:NextPattern("^[%(%)%[%]{}]") then
+				addToken( "brackets", self.tokendata)
 			else
 				self:NextCharacter()
 				addToken( "notfound", self.tokendata )
 			end
-			
-		end
-		
-		if self.tokendata ~= "" then
-			addToken( "notfound", self.tokendata )
+			self.tokendata = ""
 		end
 		
 		return cols
@@ -341,6 +288,25 @@ if CLIENT then
 		SF.Editor.editor = vgui.Create("Expression2EditorFrame")
 		SF.Editor.editor:Setup("SF Editor", "Starfall", "nothing") -- Setting the editor type to not nil keeps the validator line
 		
+		-- Add "Sound Browser" button
+		do
+			local editor = SF.Editor.editor
+			local SoundBrw = editor:addComponent(vgui.Create("Button", editor), -205, 30, -125, 20)
+			SoundBrw.panel:SetText("")
+			SoundBrw.panel.Font = "E2SmallFont"
+			SoundBrw.panel.Paint = function(button)
+				local w,h = button:GetSize()
+				draw.RoundedBox(1, 0, 0, w, h, editor.colors.col_FL)
+				if ( button.Hovered ) then draw.RoundedBox(0, 1, 1, w - 2, h - 2, Color(0,0,0,192)) end
+				surface.SetFont(button.Font)
+				surface.SetTextPos( 3, 4 )
+				surface.SetTextColor( 255, 255, 255, 255 )
+				surface.DrawText("  Sound Browser")
+			end
+			SoundBrw.panel.DoClick = function() RunConsoleCommand("wire_sound_browser_open") end
+			editor.C.SoundBrw = SoundBrw
+		end
+		
 		SF.Editor.editor:SetSyntaxColorLine( SyntaxColorLine )
 		--SF.Editor.editor:SetSyntaxColorLine( function(self, row) return {{self.Rows[row], Color(255,255,255)}} end)
 		
@@ -352,8 +318,6 @@ if CLIENT then
 		end
 		
 		local editor = SF.Editor.editor:GetCurrentEditor()
-		editor.Start = editor:MovePosition({1,1}, #code1)
-		editor.Caret = editor:MovePosition(editor.Start, #code2)
 		
 		function SF.Editor.editor:Validate(gotoerror)
 			local err = CompileString(self:GetCode(), "SF:"..(self:GetChosenFile() or "main"), false)
